@@ -1,4 +1,4 @@
-name: Build and publish SNAP package
+name: Build SNAP package
 
 run-name: Build ONLYOFFICE_Docs-${{ github.event.inputs.version }}-${{ github.event.inputs.build }}
 
@@ -38,20 +38,12 @@ jobs:
       uses: snapcore/action-build@v1
       id: build
 
-    - name: Publish ARM64 snap
-      uses: snapcore/action-publish@v1
-      env:
-        SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}
+    - name: Upload ARM64 snap artifact
+      uses: actions/upload-artifact@v4
       with:
-        snap: onlyoffice-ds_${{ github.event.inputs.version }}_arm64.snap
-        release: beta
-
-    - name: Notice for revision
-      run: |
-        REVISION=$(cat /home/runner/actions-runner/*/_diag/pages/*.log | grep Revision | awk '{print $3}' | tail -n 1)
-        for STR in $REVISION; do
-          echo "::notice::Snap published to revision $STR"
-        done
+        name: onlyoffice-ds-${{ github.event.inputs.version }}-arm64
+        path: onlyoffice-ds_${{ github.event.inputs.version }}_arm64.snap
+        if-no-files-found: error
 
   build_amd64:
     runs-on: ubuntu-24.04
@@ -76,18 +68,10 @@ jobs:
       uses: snapcore/action-build@v1
       id: build
 
-    - name: Publish AMD64 snap
-      uses: snapcore/action-publish@v1
-      env:
-        SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}
+    - name: Upload AMD64 snap artifact
+      uses: actions/upload-artifact@v4
       with:
-        snap: onlyoffice-ds_${{ github.event.inputs.version }}_amd64.snap
-        release: beta
-
-    - name: Notice for revision
-      run: |
-        REVISION=$(cat /home/runner/actions-runner/*/_diag/pages/*.log | grep Revision | awk '{print $3}' | tail -n 1)
-        for STR in $REVISION; do
-          echo "::notice::Snap published to revision $STR"
-        done
+        name: onlyoffice-ds-${{ github.event.inputs.version }}-amd64
+        path: onlyoffice-ds_${{ github.event.inputs.version }}_amd64.snap
+        if-no-files-found: error
 
