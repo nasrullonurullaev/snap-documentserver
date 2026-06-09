@@ -32,7 +32,7 @@ jobs:
         #arm
         #sed -i -e '/arm64:/s|https://download.onlyoffice.com/install/document|https://s3.eu-west-1.amazonaws.com/repo-doc-onlyoffice-com/|' ./snap/snapcraft.yaml
         sed -i -e '/arm64:/s|server/linux/|server/linux/snap/|' ./snap/snapcraft.yaml
-        sed -i -e "/arm64:/s|_aarch64|-${BUILD_NUMBER}-aarch64|" ./snap/snapcraft.yaml
+        #sed -i -e "/arm64:/s|_aarch64|-${BUILD_NUMBER}-aarch64|" ./snap/snapcraft.yaml
 
     - name: Build snap
       uses: snapcore/action-build@v1
@@ -62,7 +62,7 @@ jobs:
         #x64
         #sed -i -e '/amd64:/s|https://download.onlyoffice.com/install/document|https://s3.eu-west-1.amazonaws.com/repo-doc-onlyoffice-com/|' ./snap/snapcraft.yaml
         sed -i -e '/amd64:/s|server/linux/|server/linux/snap/|' ./snap/snapcraft.yaml
-        sed -i -e "/amd64:/s|_x86_64|-${BUILD_NUMBER}-x86_64|" ./snap/snapcraft.yaml
+        #sed -i -e "/amd64:/s|_x86_64|-${BUILD_NUMBER}-x86_64|" ./snap/snapcraft.yaml
 
     - name: Build snap
       uses: snapcore/action-build@v1
