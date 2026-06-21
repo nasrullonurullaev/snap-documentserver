@@ -1,0 +1,309 @@
+name: Build and test snap
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep-droplet:
+        description: Keep DigitalOcean droplet for debugging
+        required: false
+        default: false
+        type: boolean
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+permissions:
+  contents: read
+
+env:
+  DO_API: https://api.digitalocean.com/v2
+  DO_REGION: ${{ vars.DO_REGION || 'fra1' }}
+  DO_SIZE: ${{ vars.DO_SIZE || 's-2vcpu-4gb' }}
+  SSH_OPTS: -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10
+  DO_STATUS_RETRIES: 60
+  SSH_RETRIES: 60
+  RETRY_DELAY_SECONDS: 10
+
+jobs:
+  build:
+    name: Build amd64 snap
+    runs-on: ubuntu-24.04
+    outputs:
+      snap-name: ${{ steps.snap.outputs.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read snap name
+        id: snap
+        run: |
+          set -euo pipefail
+          name=$(awk -F': *' '$1 == "name" { gsub(/^["'"'"']|["'"'"']$/, "", $2); print $2; exit }' snap/snapcraft.yaml)
+          if [ -z "$name" ]; then
+            echo "Unable to read snap name from snap/snapcraft.yaml" >&2
+            exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Build snap
+        uses: snapcore/action-build@v1
+        id: build
+        with:
+          path: .
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.snap.outputs.name }}-amd64-snap
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
+
+  test:
+    name: Test ${{ matrix.os.name }} / ${{ matrix.scenario }}
+    runs-on: ubuntu-24.04
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - name: ubuntu-24.04
+            image: ubuntu-24-04-x64
+          - name: ubuntu-22.04
+            image: ubuntu-22-04-x64
+          - name: debian-12
+            image: debian-12-x64
+          - name: fedora-44
+            image: fedora-44-x64
+        scenario:
+          - clean
+          - upgrade
+    env:
+      SNAP_NAME: ${{ needs.build.outputs.snap-name }}
+      KEEP_DROPLET: ${{ inputs['keep-droplet'] || false }}
+      DROPLET_NAME: snap-test-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os.name }}-${{ matrix.scenario }}
+    steps:
+      - name: Download snap artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.SNAP_NAME }}-amd64-snap
+          path: snap-artifact
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Prepare SSH key
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' '${{ secrets.DO_SSH_PRIVATE_KEY }}' > ~/.ssh/id_do
+          chmod 600 ~/.ssh/id_do
+
+      - name: Create droplet
+        id: create
+        env:
+          DO_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          DO_SSH_KEY_FINGERPRINT: ${{ secrets.DO_SSH_KEY_FINGERPRINT }}
+          IMAGE: ${{ matrix.os.image }}
+        run: |
+          set -euo pipefail
+
+          PAYLOAD=$(jq -n \
+            --arg name "$DROPLET_NAME" \
+            --arg region "$DO_REGION" \
+            --arg size "$DO_SIZE" \
+            --arg image "$IMAGE" \
+            --arg ssh_key "$DO_SSH_KEY_FINGERPRINT" \
+            '{
+              name: $name,
+              region: $region,
+              size: $size,
+              image: $image,
+              ipv6: false,
+              monitoring: false,
+              ssh_keys: [($ssh_key | tonumber? // $ssh_key)]
+            }')
+
+          RESPONSE=$(curl -sS -X POST "$DO_API/droplets" \
+            -H "Authorization: Bearer $DO_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          echo "$RESPONSE" | jq .
+
+          DROPLET_ID=$(echo "$RESPONSE" | jq -r '.droplet.id // empty')
+          if [ -z "$DROPLET_ID" ]; then
+            echo "Failed to create droplet"
+            exit 1
+          fi
+
+          echo "droplet_id=$DROPLET_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for droplet to become active and get IP
+        id: wait
+        env:
+          DO_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          DROPLET_ID: ${{ steps.create.outputs.droplet_id }}
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 "$DO_STATUS_RETRIES"); do
+            RESPONSE=$(curl -sS \
+              -H "Authorization: Bearer $DO_TOKEN" \
+              "$DO_API/droplets/${DROPLET_ID}")
+
+            STATUS=$(echo "$RESPONSE" | jq -r '.droplet.status // empty')
+            IP=$(echo "$RESPONSE" | jq -r '.droplet.networks.v4[]? | select(.type == "public") | .ip_address' | head -n1)
+
+            echo "Attempt $attempt: status=${STATUS:-unknown} ip=${IP:-none}"
+
+            if [ "$STATUS" = "active" ] && [ -n "${IP:-}" ]; then
+              echo "ip=$IP" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            sleep "$RETRY_DELAY_SECONDS"
+          done
+
+          echo "Droplet did not become active in time"
+          exit 1
+
+      - name: Wait for SSH
+        env:
+          HOST: ${{ steps.wait.outputs.ip }}
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 "$SSH_RETRIES"); do
+            if ssh -i ~/.ssh/id_do $SSH_OPTS root@"$HOST" true; then
+              exit 0
+            fi
+            echo "SSH not ready yet, retry $attempt"
+            sleep "$RETRY_DELAY_SECONDS"
+          done
+
+          echo "SSH did not become available"
+          exit 1
+
+      - name: Copy snap to droplet
+        env:
+          HOST: ${{ steps.wait.outputs.ip }}
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/id_do $SSH_OPTS snap-artifact/*.snap root@"$HOST":/root/
+
+      - name: Run ${{ matrix.scenario }} scenario
+        env:
+          HOST: ${{ steps.wait.outputs.ip }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_do $SSH_OPTS root@"$HOST" \
+            SNAP_NAME="$SNAP_NAME" SCENARIO="${{ matrix.scenario }}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          install_snapd() {
+            if command -v snap >/dev/null 2>&1; then
+              return
+            fi
+            if command -v apt-get >/dev/null 2>&1; then
+              apt-get update
+              apt-get install -y snapd
+            elif command -v dnf >/dev/null 2>&1; then
+              dnf install -y snapd
+              ln -sfn /var/lib/snapd/snap /snap
+            else
+              echo "Unsupported distribution: snapd package manager not found" >&2
+              exit 1
+            fi
+            systemctl enable --now snapd.socket
+            systemctl restart snapd || true
+          }
+
+          wait_for_snapd() {
+            for attempt in {1..30}; do
+              if snap version >/dev/null 2>&1; then
+                return
+              fi
+              echo "Waiting for snapd ($attempt/30)..."
+              sleep 5
+            done
+            snap version
+          }
+
+          collect_logs() {
+            snap services "$SNAP_NAME" || true
+            snap logs "$SNAP_NAME" -n=200 || true
+            journalctl -xe --no-pager | tail -200 || true
+          }
+
+          run_scenario() {
+            case "$SCENARIO" in
+              clean)
+                snap install --dangerous ./${SNAP_NAME}_*.snap
+                ;;
+              upgrade)
+                snap install "$SNAP_NAME"
+                snap install --dangerous ./${SNAP_NAME}_*.snap
+                ;;
+              *)
+                echo "Unknown scenario: $SCENARIO" >&2
+                exit 1
+                ;;
+            esac
+          }
+
+          check_services() {
+            snap services "$SNAP_NAME"
+            snap services "$SNAP_NAME" | awk -v service="$SNAP_NAME.nginx" '$1==service { if ($3!="active") exit 1; found=1 } END { exit !found }'
+            snap services "$SNAP_NAME" | awk -v service="$SNAP_NAME.documentserver" '$1==service { if ($3!="active") exit 1; found=1 } END { exit !found }'
+          }
+
+          trap 'status=$?; if [ "$status" -ne 0 ]; then collect_logs; fi; exit "$status"' EXIT
+          install_snapd
+          wait_for_snapd
+          run_scenario
+          check_services
+          REMOTE
+
+      - name: Cleanup droplet
+        if: always()
+        env:
+          DO_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          DROPLET_ID: ${{ steps.create.outputs.droplet_id }}
+          DROPLET_IP: ${{ steps.wait.outputs.ip }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DROPLET_ID:-}" ]; then
+            echo "Droplet ID is empty; skipping cleanup"
+            exit 0
+          fi
+
+          if [ "$KEEP_DROPLET" = "true" ]; then
+            {
+              echo "### Kept DigitalOcean droplet"
+              echo "- Matrix OS: ${{ matrix.os.name }}"
+              echo "- Scenario: ${{ matrix.scenario }}"
+              echo "- Droplet ID: $DROPLET_ID"
+              echo "- Droplet IP: ${DROPLET_IP:-unknown}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          RESPONSE=$(curl -sS -X DELETE \
+            -H "Authorization: Bearer $DO_TOKEN" \
+            "$DO_API/droplets/${DROPLET_ID}" \
+            -w "\n%{http_code}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "404" ]; then
+            echo "Cleanup completed with HTTP $HTTP_CODE"
+            exit 0
+          fi
+
+          echo "Unexpected cleanup response:"
+          echo "$RESPONSE"
+          exit 1
