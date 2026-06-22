@@ -187,15 +187,15 @@ jobs:
             sudo rm -rf "/tmp/snap-private-tmp/snap.${SNAP_NAME}"
           }
 
-          install_dangerous_snap() {
-            tolerate_existing_install=${1:-false}
+          install_local_snap() {
+            local allow_existing_install=${1:-false}
 
             if sudo snap install --dangerous ./${SNAP_NAME}_*.snap; then
               wait_for_snapd_idle
               return
             fi
 
-            if [ "$tolerate_existing_install" = true ] && snap list "$SNAP_NAME" >/dev/null 2>&1; then
+            if [ "$allow_existing_install" = true ] && snap list "$SNAP_NAME" >/dev/null 2>&1; then
               echo "${SNAP_NAME} is installed despite the non-zero snap install exit code" >&2
               wait_for_snapd_idle
               return
@@ -207,13 +207,13 @@ jobs:
           run_scenario() {
             case "$SCENARIO" in
               clean)
-                install_dangerous_snap true
+                install_local_snap true
                 ;;
               upgrade)
                 sudo snap install "$SNAP_NAME"
                 wait_for_snapd_idle
                 prepare_snap_refresh
-                install_dangerous_snap
+                install_local_snap
                 sudo snap start "$SNAP_NAME"
                 wait_for_snapd_idle
                 ;;
