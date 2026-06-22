@@ -138,13 +138,8 @@ jobs:
             "SNAP_NAME='$SNAP_NAME' SCENARIO='$SCENARIO' bash -s" <<'REMOTE_SCRIPT'
           set -euo pipefail
 
-          log_section() {
-            echo
-            echo "==> $*"
-          }
-
           install_snapd() {
-            log_section "Ensure snapd is installed"
+            echo "==> Ensure snapd is installed"
             if command -v snap >/dev/null 2>&1; then
               return
             fi
@@ -167,7 +162,7 @@ jobs:
           }
 
           wait_for_snapd() {
-            log_section "Wait for snapd to become idle"
+            echo "==> Wait for snapd to become idle"
             for attempt in {1..60}; do
               if ! snap changes | awk 'NR > 1 && $2 == "Doing" { found = 1 } END { exit found ? 0 : 1 }'; then
                 return
@@ -185,7 +180,7 @@ jobs:
           install_local_snap() {
             local allow_existing_install=${1:-false}
 
-            log_section "Install local snap artifact"
+            echo "==> Install local snap artifact"
             if snap install --dangerous ./${SNAP_NAME}_*.snap; then
               wait_for_snapd
               return
@@ -201,13 +196,13 @@ jobs:
           }
 
           install_store_snap() {
-            log_section "Install current stable snap from the store"
+            echo "==> Install current stable snap from the store"
             snap install "$SNAP_NAME"
             wait_for_snapd
           }
 
           prepare_for_refresh() {
-            log_section "Prepare installed snap for local refresh"
+            echo "==> Prepare installed snap for local refresh"
             snap stop "$SNAP_NAME" || true
             wait_for_snapd
             rm -rf "/tmp/snap-private-tmp/snap.${SNAP_NAME}"
@@ -226,7 +221,7 @@ jobs:
           }
 
           run_scenario() {
-            log_section "Run ${SCENARIO} scenario"
+            echo "==> Run ${SCENARIO} scenario"
             case "$SCENARIO" in
               clean) run_clean_scenario ;;
               upgrade) run_upgrade_scenario ;;
@@ -246,7 +241,7 @@ jobs:
           }
 
           check_services() {
-            log_section "Check snap services"
+            echo "==> Check snap services"
             snap services "$SNAP_NAME"
             require_service_active "${SNAP_NAME}.nginx"
             require_service_active "${SNAP_NAME}.documentserver"
