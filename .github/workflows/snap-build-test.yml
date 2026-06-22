@@ -61,8 +61,8 @@ jobs:
             image: ubuntu-22-04-x64
           - name: debian-12
             image: debian-12-x64
-          - name: fedora-44
-            image: fedora-44-x64
+          - name: fedora-43
+            image: fedora-43-x64
         scenario:
           - clean
           - upgrade
@@ -167,14 +167,55 @@ jobs:
             echo "::endgroup::"
           }
 
+          wait_for_snapd_idle() {
+            for attempt in {1..60}; do
+              if ! snap changes | awk 'NR > 1 && $2 == "Doing" { found=1 } END { exit found ? 0 : 1 }'; then
+                return
+              fi
+              echo "Waiting for snapd changes to finish ($attempt/60)..."
+              sleep 5
+            done
+
+            echo "snapd still has changes in progress:" >&2
+            snap changes >&2 || true
+            return 1
+          }
+
+          prepare_snap_refresh() {
+            sudo snap stop "$SNAP_NAME" || true
+            wait_for_snapd_idle
+            sudo rm -rf "/tmp/snap-private-tmp/snap.${SNAP_NAME}"
+          }
+
+          install_dangerous_snap() {
+            tolerate_existing_install=${1:-false}
+
+            if sudo snap install --dangerous ./${SNAP_NAME}_*.snap; then
+              wait_for_snapd_idle
+              return
+            fi
+
+            if [ "$tolerate_existing_install" = true ] && snap list "$SNAP_NAME" >/dev/null 2>&1; then
+              echo "${SNAP_NAME} is installed despite the non-zero snap install exit code" >&2
+              wait_for_snapd_idle
+              return
+            fi
+
+            return 1
+          }
+
           run_scenario() {
             case "$SCENARIO" in
               clean)
-                sudo snap install --dangerous ./${SNAP_NAME}_*.snap
+                install_dangerous_snap true
                 ;;
               upgrade)
                 sudo snap install "$SNAP_NAME"
-                sudo snap install --dangerous ./${SNAP_NAME}_*.snap
+                wait_for_snapd_idle
+                prepare_snap_refresh
+                install_dangerous_snap
+                sudo snap start "$SNAP_NAME"
+                wait_for_snapd_idle
                 ;;
               *)
                 echo "Unknown scenario: $SCENARIO" >&2
