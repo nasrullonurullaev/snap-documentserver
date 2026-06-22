@@ -2,12 +2,6 @@ name: Build and test snap package
 
 on:
   workflow_dispatch:
-    inputs:
-      keep-droplet:
-        description: Keep DigitalOcean droplet for debugging
-        required: false
-        default: false
-        type: boolean
 
 env:
   DO_REGION: ${{ vars.DO_REGION || 'fra1' }}
@@ -133,16 +127,28 @@ jobs:
           scp -i ~/.ssh/do_snap_test -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$snap_file" root@"${{ steps.droplet.outputs.ip }}":"${SNAP_NAME}_test.snap"
 
       - name: Run ${{ matrix.scenario }} scenario and service checks
+        env:
+          DROPLET_IP: ${{ steps.droplet.outputs.ip }}
+          SCENARIO: ${{ matrix.scenario }}
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/do_snap_test -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"${{ steps.droplet.outputs.ip }}" \
-            "SNAP_NAME='$SNAP_NAME' SCENARIO='${{ matrix.scenario }}' bash -s" <<'REMOTE_SCRIPT'
+
+          ssh_opts=(-i ~/.ssh/do_snap_test -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          ssh "${ssh_opts[@]}" root@"$DROPLET_IP" \
+            "SNAP_NAME='$SNAP_NAME' SCENARIO='$SCENARIO' bash -s" <<'REMOTE_SCRIPT'
           set -euo pipefail
 
+          log_section() {
+            echo
+            echo "==> $*"
+          }
+
           install_snapd() {
+            log_section "Ensure snapd is installed"
             if command -v snap >/dev/null 2>&1; then
               return
             fi
+
             if command -v apt-get >/dev/null 2>&1; then
               apt-get update
               DEBIAN_FRONTEND=noninteractive apt-get install -y snapd
@@ -154,25 +160,20 @@ jobs:
               echo "No supported package manager found for snapd installation" >&2
               exit 1
             fi
+
             systemctl enable --now snapd.socket
             ln -sfn /var/lib/snapd/snap /snap
             snap wait system seed.loaded
           }
 
-          collect_logs() {
-            echo "::group::snap diagnostics"
-            snap services "$SNAP_NAME" || true
-            sudo snap logs "$SNAP_NAME" -n=200 || true
-            journalctl -xe --no-pager | tail -200 || true
-            echo "::endgroup::"
-          }
-
-          wait_for_snapd_idle() {
+          wait_for_snapd() {
+            log_section "Wait for snapd to become idle"
             for attempt in {1..60}; do
-              if ! snap changes | awk 'NR > 1 && $2 == "Doing" { found=1 } END { exit found ? 0 : 1 }'; then
+              if ! snap changes | awk 'NR > 1 && $2 == "Doing" { found = 1 } END { exit found ? 0 : 1 }'; then
                 return
               fi
-              echo "Waiting for snapd changes to finish ($attempt/60)..."
+
+              echo "snapd is still busy ($attempt/60)..."
               sleep 5
             done
 
@@ -181,42 +182,54 @@ jobs:
             return 1
           }
 
-          prepare_snap_refresh() {
-            sudo snap stop "$SNAP_NAME" || true
-            wait_for_snapd_idle
-            sudo rm -rf "/tmp/snap-private-tmp/snap.${SNAP_NAME}"
-          }
-
           install_local_snap() {
             local allow_existing_install=${1:-false}
 
-            if sudo snap install --dangerous ./${SNAP_NAME}_*.snap; then
-              wait_for_snapd_idle
+            log_section "Install local snap artifact"
+            if snap install --dangerous ./${SNAP_NAME}_*.snap; then
+              wait_for_snapd
               return
             fi
 
             if [ "$allow_existing_install" = true ] && snap list "$SNAP_NAME" >/dev/null 2>&1; then
               echo "${SNAP_NAME} is installed despite the non-zero snap install exit code" >&2
-              wait_for_snapd_idle
+              wait_for_snapd
               return
             fi
 
             return 1
           }
 
+          install_store_snap() {
+            log_section "Install current stable snap from the store"
+            snap install "$SNAP_NAME"
+            wait_for_snapd
+          }
+
+          prepare_for_refresh() {
+            log_section "Prepare installed snap for local refresh"
+            snap stop "$SNAP_NAME" || true
+            wait_for_snapd
+            rm -rf "/tmp/snap-private-tmp/snap.${SNAP_NAME}"
+          }
+
+          run_clean_scenario() {
+            install_local_snap true
+          }
+
+          run_upgrade_scenario() {
+            install_store_snap
+            prepare_for_refresh
+            install_local_snap
+            snap start "$SNAP_NAME"
+            wait_for_snapd
+          }
+
           run_scenario() {
+            log_section "Run ${SCENARIO} scenario"
             case "$SCENARIO" in
-              clean)
-                install_local_snap true
-                ;;
-              upgrade)
-                sudo snap install "$SNAP_NAME"
-                wait_for_snapd_idle
-                prepare_snap_refresh
-                install_local_snap
-                sudo snap start "$SNAP_NAME"
-                wait_for_snapd_idle
-                ;;
+              clean) run_clean_scenario ;;
+              upgrade) run_upgrade_scenario ;;
               *)
                 echo "Unknown scenario: $SCENARIO" >&2
                 exit 1
@@ -224,31 +237,28 @@ jobs:
             esac
           }
 
-          check_services() {
-            snap services "$SNAP_NAME"
-            snap services "$SNAP_NAME" | awk -v svc="${SNAP_NAME}.nginx" '$1==svc { if ($3!="active") exit 1; found=1 } END { exit !found }'
-            snap services "$SNAP_NAME" | awk -v svc="${SNAP_NAME}.documentserver" '$1==svc { if ($3!="active") exit 1; found=1 } END { exit !found }'
+          require_service_active() {
+            local service="$1"
+            snap services "$SNAP_NAME" | awk -v svc="$service" '
+              $1 == svc { found = 1; state = $3 }
+              END { exit !(found && state == "active") }
+            '
           }
 
-          trap collect_logs ERR
+          check_services() {
+            log_section "Check snap services"
+            snap services "$SNAP_NAME"
+            require_service_active "${SNAP_NAME}.nginx"
+            require_service_active "${SNAP_NAME}.documentserver"
+          }
+
           install_snapd
           run_scenario
           check_services
           REMOTE_SCRIPT
 
-      - name: Keep droplet summary
-        if: ${{ always() && inputs.keep-droplet }}
-        run: |
-          {
-            echo "### DigitalOcean droplet kept for debugging"
-            echo "- Matrix OS: ${{ matrix.os.name }}"
-            echo "- Scenario: ${{ matrix.scenario }}"
-            echo "- Droplet ID: ${{ steps.droplet.outputs.id }}"
-            echo "- Droplet IP: ${{ steps.droplet.outputs.ip }}"
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Delete DigitalOcean droplet
-        if: ${{ always() && !inputs.keep-droplet }}
+        if: ${{ always() }}
         run: |
           set -euo pipefail
           if [ -n "${{ steps.droplet.outputs.id }}" ]; then
