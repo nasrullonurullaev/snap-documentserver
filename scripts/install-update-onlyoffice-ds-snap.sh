@@ -127,6 +127,13 @@ check_services() {
   return 1
 }
 
+enable_example_app() {
+  echo "==> Enable example app"
+  snap set "$SNAP_NAME" onlyoffice.example-enabled=true
+  wait_for_snapd
+}
+
 install_snapd
 run_scenario
 check_services
+enable_example_app
