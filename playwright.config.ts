@@ -9,7 +9,7 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost',
     trace: 'on-first-retry',
-    video: 'on',
+    video: 'retain-on-failure',
   },
   projects: [
     {
