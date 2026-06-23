@@ -110,7 +110,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in {1..60}; do
-            if ssh -i ~/.ssh/do_snap_test -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@"${{ steps.droplet.outputs.ip }}" true; then
+            if ssh -i ~/.ssh/do_snap_test -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 root@"${{ steps.droplet.outputs.ip }}" true; then
               exit 0
             fi
             echo "Waiting for SSH ($attempt/60)..."
@@ -127,7 +127,7 @@ jobs:
             echo "No .snap artifact found in dist" >&2
             exit 1
           fi
-          scp -i ~/.ssh/do_snap_test -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          scp -i ~/.ssh/do_snap_test -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
             "$snap_file" \
             e2e-playwright/install-update-onlyoffice-ds-snap.sh \
             root@"${{ steps.droplet.outputs.ip }}":./
@@ -139,7 +139,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          ssh_opts=(-i ~/.ssh/do_snap_test -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          # Keep the SSH session alive during long-running snap installs that may be quiet.
+          ssh_opts=(
+            -i ~/.ssh/do_snap_test
+            -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=10
+          )
           ssh "${ssh_opts[@]}" root@"$DROPLET_IP" \
             "SNAP_NAME='$SNAP_NAME' SCENARIO='$SCENARIO' bash ./install-update-onlyoffice-ds-snap.sh"
 
@@ -154,7 +161,7 @@ jobs:
           npm ci --prefix e2e-playwright
           npm --prefix e2e-playwright exec -- playwright install --with-deps chromium
 
-      - name: Run Playwright example test
+      - name: Run Playwright Document Server test
         env:
           PLAYWRIGHT_BASE_URL: http://${{ steps.droplet.outputs.ip }}
         run: npm run --prefix e2e-playwright test:e2e
