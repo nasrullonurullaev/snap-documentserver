@@ -143,6 +143,53 @@ jobs:
           ssh "${ssh_opts[@]}" root@"$DROPLET_IP" \
             "SNAP_NAME='$SNAP_NAME' SCENARIO='$SCENARIO' bash ./install-update-onlyoffice-ds-snap.sh"
 
+      - name: Enable example app
+        env:
+          DROPLET_IP: ${{ steps.droplet.outputs.ip }}
+        run: |
+          set -euo pipefail
+
+          ssh_opts=(-i ~/.ssh/do_snap_test -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          ssh "${ssh_opts[@]}" root@"$DROPLET_IP" \
+            "snap set '$SNAP_NAME' onlyoffice.example-enabled=true"
+
+          for attempt in {1..60}; do
+            if curl --fail --silent --show-error --max-time 10 "http://$DROPLET_IP/example/" >/dev/null; then
+              exit 0
+            fi
+            echo "Waiting for example app ($attempt/60)..."
+            sleep 5
+          done
+
+          echo "Example app did not become available" >&2
+          exit 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright
+        run: |
+          set -euo pipefail
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Run Playwright example test
+        env:
+          PLAYWRIGHT_BASE_URL: http://${{ steps.droplet.outputs.ip }}
+        run: npm run test:e2e
+
+      - name: Upload Playwright artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts-${{ matrix.os.name }}-${{ matrix.scenario }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+
       - name: Delete DigitalOcean droplet
         if: ${{ always() }}
         run: |
