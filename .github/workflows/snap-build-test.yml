@@ -172,7 +172,7 @@ jobs:
       - name: Install Playwright
         run: |
           set -euo pipefail
-          npm install
+          npm ci
           npx playwright install --with-deps chromium
 
       - name: Run Playwright example test

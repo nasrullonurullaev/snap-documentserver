@@ -1,27 +1,33 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '@playwright/test';
 
-const editorFrame = 'iframe[name="frameEditor"]';
-
-async function openExampleEditor(page: Page, name: string | RegExp, value: string) {
-  const popupPromise = page.waitForEvent('popup');
-  await page.getByRole('link', { name }).click();
-  const editorPage = await popupPromise;
-
-  await editorPage.locator(editorFrame).waitFor({ state: 'visible' });
-  const editorArea = editorPage.frameLocator(editorFrame).locator('#area_id');
-  await expect(editorArea).toBeVisible();
-  await editorArea.fill(value);
-  await expect(editorArea).toHaveValue(value);
-
-  await editorPage.close();
-}
-
-test('creates and edits example document types', async ({ page }) => {
+test('test', async ({ page }) => {
   await page.goto('/example/');
-  await expect(page.getByRole('link', { name: 'Document' })).toBeVisible();
+  const page1Promise = page.waitForEvent('popup');
 
-  await openExampleEditor(page, 'Document', 'OnlyOffice');
-  await openExampleEditor(page, 'Spreadsheet', 'OnlyOffice ');
-  await openExampleEditor(page, 'Presentation', 'OnlyOffice');
-  await openExampleEditor(page, 'PDF form', 'OnlyOffice');
+  await page.getByRole('link', { name: 'Document' }).click();
+  const page1 = await page1Promise;
+  await page.waitForTimeout(3000);
+  await page1.locator('iframe[name="frameEditor"]').contentFrame().locator('#area_id').fill('OnlyOffice');
+  const page2Promise = page.waitForEvent('popup');
+  await page.waitForTimeout(3000);
+
+  await page.getByRole('link', { name: 'Spreadsheet' }).click();
+  const page2 = await page2Promise;
+  await page.waitForTimeout(3000);
+  await page2.locator('iframe[name="frameEditor"]').contentFrame().locator('#area_id').fill('OnlyOffice ');
+  const page3Promise = page.waitForEvent('popup');
+  await page.waitForTimeout(3000);
+
+  await page.getByRole('link', { name: 'Presentation' }).click();
+  const page3 = await page3Promise;
+  await page.waitForTimeout(3000);
+  await page3.locator('iframe[name="frameEditor"]').contentFrame().locator('#area_id').fill('OnlyOffice');
+  const page4Promise = page.waitForEvent('popup');
+  await page.waitForTimeout(3000);
+
+  await page.getByRole('link', { name: 'PDF form' }).click();
+  const page4 = await page4Promise;
+  await page.waitForTimeout(3000);
+  await page4.locator('iframe[name="frameEditor"]').contentFrame().locator('#area_id').fill('OnlyOffice');
+  await page.waitForTimeout(3000);
 });

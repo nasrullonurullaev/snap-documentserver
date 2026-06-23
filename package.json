@@ -1,11 +1,10 @@
 {
   "name": "snap-documentserver",
-  "version": "0.0.0",
   "private": true,
   "scripts": {
     "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.53.0"
+    "@playwright/test": "^1.54.1"
   }
 }
