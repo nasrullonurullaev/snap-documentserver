@@ -64,6 +64,9 @@ jobs:
       SNAP_NAME: ${{ needs.build.outputs.snap-name }}
       DROPLET_NAME: snap-test-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os.name }}-${{ matrix.scenario }}
     steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
       - name: Download snap artifact
         uses: actions/download-artifact@v4
         with:
