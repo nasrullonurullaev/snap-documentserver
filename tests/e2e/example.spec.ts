@@ -4,7 +4,7 @@ test('test', async ({ page }) => {
   await page.goto('/example/');
   const page1Promise = page.waitForEvent('popup');
 
-  await page.getByRole('link', { name: 'Document' }).click();
+  await page.getByRole('link', { name: 'Document', exact: true }).click();
   const page1 = await page1Promise;
   await page.waitForTimeout(3000);
   await page1.locator('iframe[name="frameEditor"]').contentFrame().locator('#area_id').fill('OnlyOffice');
