@@ -79,8 +79,8 @@ parts:
   server:
     plugin: dump
     source:
-      - to amd64: https://download.onlyoffice.com/install/documentserver/linux/onlyoffice-documentserver-${SNAPCRAFT_PROJECT_VERSION}_x86_64.tar.gz
-      - to arm64: https://download.onlyoffice.com/install/documentserver/linux/onlyoffice-documentserver-${SNAPCRAFT_PROJECT_VERSION}_aarch64.tar.gz
+      - to amd64: https://download.onlyoffice.com/install/documentserver/linux/onlyoffice-documentserver-9.3.1_x86_64.tar.gz
+      - to arm64: https://download.onlyoffice.com/install/documentserver/linux/onlyoffice-documentserver-9.3.1_aarch64.tar.gz
     stage-packages:
       - curl
       - libxml2
