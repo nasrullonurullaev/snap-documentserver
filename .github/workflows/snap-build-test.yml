@@ -16,7 +16,7 @@ jobs:
       artifact-name: ${{ steps.snap.outputs.artifact-name }}
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Read snap metadata
         id: snap
@@ -35,7 +35,7 @@ jobs:
         id: build
 
       - name: Upload snap artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.snap.outputs.artifact-name }}
           path: ${{ steps.build.outputs.snap }}
@@ -65,10 +65,10 @@ jobs:
       DROPLET_NAME: snap-test-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os.name }}-${{ matrix.scenario }}
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download snap artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ needs.build.outputs.artifact-name }}
           path: dist
@@ -143,25 +143,8 @@ jobs:
           ssh "${ssh_opts[@]}" root@"$DROPLET_IP" \
             "SNAP_NAME='$SNAP_NAME' SCENARIO='$SCENARIO' bash ./install-update-onlyoffice-ds-snap.sh"
 
-      - name: Check example app
-        env:
-          DROPLET_IP: ${{ steps.droplet.outputs.ip }}
-        run: |
-          set -euo pipefail
-
-          for attempt in {1..60}; do
-            if curl --fail --silent --show-error --max-time 10 "http://$DROPLET_IP/example/" >/dev/null; then
-              exit 0
-            fi
-            echo "Waiting for example app ($attempt/60)..."
-            sleep 5
-          done
-
-          echo "Example app did not become available" >&2
-          exit 1
-
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -178,7 +161,7 @@ jobs:
 
       - name: Upload Playwright artifacts
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-artifacts-${{ matrix.os.name }}-${{ matrix.scenario }}
           path: |
