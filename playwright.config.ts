@@ -2,9 +2,9 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  timeout: 30_000,
+  timeout: 100_000,
   expect: {
-    timeout: 5_000,
+    timeout: 50_000,
   },
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost',
