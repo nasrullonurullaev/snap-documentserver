@@ -6,14 +6,20 @@ on:
 env:
   DO_REGION: ${{ vars.DO_REGION || 'fra1' }}
   DO_SIZE: ${{ vars.DO_SIZE || 's-2vcpu-4gb' }}
+  DO_ARM_SIZE: ${{ vars.DO_ARM_SIZE || 's-2vcpu-4gb' }}
 
 jobs:
   build:
-    name: Build amd64 snap
-    runs-on: ubuntu-24.04
-    outputs:
-      snap-name: ${{ steps.snap.outputs.name }}
-      artifact-name: ${{ steps.snap.outputs.artifact-name }}
+    name: Build ${{ matrix.arch }} snap
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v5
@@ -28,7 +34,7 @@ jobs:
             exit 1
           fi
           echo "name=$snap_name" >> "$GITHUB_OUTPUT"
-          echo "artifact-name=${snap_name}-snap-amd64" >> "$GITHUB_OUTPUT"
+          echo "artifact-name=${snap_name}-snap-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
 
       - name: Build snap
         uses: snapcore/action-build@v1
@@ -42,35 +48,105 @@ jobs:
           if-no-files-found: error
 
   test:
-    name: Test ${{ matrix.os.name }} / ${{ matrix.scenario }}
-    runs-on: ubuntu-24.04
+    name: Test ${{ matrix.arch }} / ${{ matrix.os.name }} / ${{ matrix.scenario }}
+    runs-on: ${{ matrix.runner }}
     needs: build
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - name: ubuntu-24.04
-            image: ubuntu-24-04-x64
-          - name: ubuntu-22.04
-            image: ubuntu-22-04-x64
-          - name: debian-12
-            image: debian-12-x64
-          - name: fedora-43
-            image: fedora-43-x64
-        scenario:
-          - clean
-          - upgrade
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            droplet_size: ${{ vars.DO_SIZE || 's-2vcpu-4gb' }}
+            scenario: clean
+            os:
+              name: ubuntu-24.04
+              image: ubuntu-24-04-x64
+          - arch: amd64
+            runner: ubuntu-24.04
+            droplet_size: ${{ vars.DO_SIZE || 's-2vcpu-4gb' }}
+            scenario: upgrade
+            os:
+              name: ubuntu-24.04
+              image: ubuntu-24-04-x64
+          - arch: amd64
+            runner: ubuntu-24.04
+            droplet_size: ${{ vars.DO_SIZE || 's-2vcpu-4gb' }}
+            scenario: clean
+            os:
+              name: ubuntu-22.04
+              image: ubuntu-22-04-x64
+          - arch: amd64
+            runner: ubuntu-24.04
+            droplet_size: ${{ vars.DO_SIZE || 's-2vcpu-4gb' }}
+            scenario: upgrade
+            os:
+              name: ubuntu-22.04
+              image: ubuntu-22-04-x64
+          - arch: amd64
+            runner: ubuntu-24.04
+            droplet_size: ${{ vars.DO_SIZE || 's-2vcpu-4gb' }}
+            scenario: clean
+            os:
+              name: debian-12
+              image: debian-12-x64
+          - arch: amd64
+            runner: ubuntu-24.04
+            droplet_size: ${{ vars.DO_SIZE || 's-2vcpu-4gb' }}
+            scenario: upgrade
+            os:
+              name: debian-12
+              image: debian-12-x64
+          - arch: amd64
+            runner: ubuntu-24.04
+            droplet_size: ${{ vars.DO_SIZE || 's-2vcpu-4gb' }}
+            scenario: clean
+            os:
+              name: fedora-43
+              image: fedora-43-x64
+          - arch: amd64
+            runner: ubuntu-24.04
+            droplet_size: ${{ vars.DO_SIZE || 's-2vcpu-4gb' }}
+            scenario: upgrade
+            os:
+              name: fedora-43
+              image: fedora-43-x64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            droplet_size: ${{ vars.DO_ARM_SIZE || 's-2vcpu-4gb' }}
+            scenario: clean
+            os:
+              name: ubuntu-24.04
+              image: ubuntu-24-04-arm64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            droplet_size: ${{ vars.DO_ARM_SIZE || 's-2vcpu-4gb' }}
+            scenario: upgrade
+            os:
+              name: ubuntu-24.04
+              image: ubuntu-24-04-arm64
     env:
-      SNAP_NAME: ${{ needs.build.outputs.snap-name }}
-      DROPLET_NAME: snap-test-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.os.name }}-${{ matrix.scenario }}
+      DROPLET_NAME: snap-test-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}-${{ matrix.os.name }}-${{ matrix.scenario }}
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v5
 
+      - name: Read snap metadata
+        id: snap
+        run: |
+          set -euo pipefail
+          snap_name=$(awk '/^name:[[:space:]]*/ { print $2; exit }' snap/snapcraft.yaml)
+          if [ -z "$snap_name" ]; then
+            echo "Unable to read snap name from snap/snapcraft.yaml" >&2
+            exit 1
+          fi
+          echo "name=$snap_name" >> "$GITHUB_OUTPUT"
+          echo "artifact-name=${snap_name}-snap-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+
       - name: Download snap artifact
         uses: actions/download-artifact@v7
         with:
-          name: ${{ needs.build.outputs.artifact-name }}
+          name: ${{ steps.snap.outputs.artifact-name }}
           path: dist
 
       - name: Install doctl
@@ -85,7 +161,7 @@ jobs:
           result=$(doctl compute droplet create "$DROPLET_NAME" \
             --image "${{ matrix.os.image }}" \
             --region "$DO_REGION" \
-            --size "$DO_SIZE" \
+            --size "${{ matrix.droplet_size }}" \
             --ssh-keys "${{ secrets.DO_SSH_KEY_FINGERPRINT }}" \
             --wait \
             --format ID,PublicIPv4 \
@@ -136,6 +212,7 @@ jobs:
         env:
           DROPLET_IP: ${{ steps.droplet.outputs.ip }}
           SCENARIO: ${{ matrix.scenario }}
+          SNAP_NAME: ${{ steps.snap.outputs.name }}
         run: |
           set -euo pipefail
 
@@ -170,7 +247,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@v6
         with:
-          name: playwright-artifacts-${{ matrix.os.name }}-${{ matrix.scenario }}
+          name: playwright-artifacts-${{ matrix.arch }}-${{ matrix.os.name }}-${{ matrix.scenario }}
           path: |
             e2e-playwright/playwright-report/
             e2e-playwright/test-results/
