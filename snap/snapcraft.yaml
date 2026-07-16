@@ -1,6 +1,6 @@
 name: nasrullo-test
-title: Nasrullo-test
-version: "9.4.0"
+title: nasri Docs
+version: "9.3.1"
 summary: "An online office suite that allowing to create, view and edit documents."
 description: |
   ONLYOFFICE Docs is a free collaborative online office suite comprising viewers and editors for texts, spreadsheets and presentations, forms and PDF, fully compatible with Office Open XML formats: .docx, .xlsx, .pptx and enabling collaborative editing in real time.
@@ -19,6 +19,12 @@ platforms:
     build-for: [arm64]
 
 layout:
+  $SNAP/var/www/onlyoffice/documentserver/.generated:
+    bind: $SNAP_DATA/var/www/onlyoffice/documentserver
+  /etc/my.cnf:
+    bind-file: $SNAP_DATA/etc/my.cnf
+  /etc/my.cnf.d:
+    bind: $SNAP_DATA/etc/my.cnf.d
   /usr/bin/python:
     bind-file: $SNAP/usr/bin/python2.7
   /usr/bin/wget:
@@ -54,6 +60,28 @@ apps:
     restart-condition: always
     plugs: [network, network-bind, removable-media]
 
+  rabbitmq:
+    command: usr/lib/rabbitmq/bin/rabbitmq-server
+    daemon: simple
+    plugs: [network, network-bind, removable-media]
+
+  # MySQL daemon
+  mysql:
+    command: bin/start_mysql
+    stop-command: support-files/mysql.server stop
+    daemon: simple
+    restart-condition: always
+    plugs: [network, network-bind]
+  
+  # MySQL client
+  mysql-client:
+    command: bin/run-mysql
+    plugs: [network, network-bind]
+
+  mysqldump:
+    command: bin/mysqldump --lock-tables onlyoffice
+    plugs: [network, network-bind]
+
   generate-all-fonts:
     command: usr/sbin/generate-all-fonts.sh
     plugs: [desktop, unity7]
@@ -76,11 +104,23 @@ hooks:
     plugs: [network, network-bind, removable-media, desktop, unity7]
 
 parts:
+  rabbitmq:
+    plugin: dump
+    source: https://github.com/rabbitmq/rabbitmq-server/releases/download/v3.9.13/rabbitmq-server_3.9.13-1_all.deb
+    source-type: deb
+    stage-packages:
+      - erlang
+    override-build: |
+      craftctl default
+      # rabbitmq-server
+      sed -i -e 's/rabbitmq-env/rabbitmq-env-start.sh/g' $SNAPCRAFT_PART_INSTALL/usr/lib/rabbitmq/lib/rabbitmq_server-3.9.13/sbin/rabbitmq-server
+      sed -i -e 's/ROOTDIR=/ROOTDIR=$SNAP/g' $SNAPCRAFT_PART_INSTALL/usr/lib/erlang/bin/erl
+
   server:
     plugin: dump
     source:
-      - to amd64: https://download.onlyoffice.com/install/documentserver/linux/onlyoffice-documentserver-9.4.0_x86_64.tar.gz
-      - to arm64: https://download.onlyoffice.com/install/documentserver/linux/onlyoffice-documentserver-9.4.0_aarch64.tar.gz
+      - to amd64: https://download.onlyoffice.com/install/documentserver/linux/onlyoffice-documentserver-${SNAPCRAFT_PROJECT_VERSION}_x86_64.tar.gz
+      - to arm64: https://download.onlyoffice.com/install/documentserver/linux/onlyoffice-documentserver-${SNAPCRAFT_PROJECT_VERSION}_aarch64.tar.gz
     stage-packages:
       - curl
       - libxml2
@@ -119,40 +159,54 @@ parts:
       sed -i -e 's|/var/lib/onlyoffice|/var/snap/onlyoffice-ds/current/var/lib/onlyoffice|' $DIR-example/nodejs/config/production-linux.json
       cp $DIR-example/nodejs/config/* $DIR_ETC-example
       # documentserver-generate-allfonts.sh
-      OUTDIR="/var/snap/onlyoffice-ds/current/var/www/onlyoffice/documentserver"
+      GENERATED_DIR="$DIR/.generated"
+      mkdir -p "$GENERATED_DIR"
+      link_generated_file() {
+        TARGET="$GENERATED_DIR/$1"
+        LINK="$DIR/$1"
+        mkdir -p "$(dirname "$TARGET")" "$(dirname "$LINK")"
+        touch "$TARGET"
+        ln -s -f "$(realpath -m --relative-to="$(dirname "$LINK")" "$TARGET")" "$LINK"
+      }
+      link_generated_dir() {
+        TARGET="$GENERATED_DIR/$1"
+        LINK="$DIR/$1"
+        mkdir -p "$TARGET" "$(dirname "$LINK")"
+        ln -s -f "$(realpath -m --relative-to="$(dirname "$LINK")" "$TARGET")" "$LINK"
+      }
       #fonts
-      ln -s -f $OUTDIR/server/FileConverter/bin/AllFonts.js $DIR/server/FileConverter/bin/AllFonts.js
-      ln -s -f $OUTDIR/server/FileConverter/bin/font_selection.bin $DIR/server/FileConverter/bin/font_selection.bin
-      ln -s -f $OUTDIR/fonts $DIR/fonts
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail.png              $DIR/sdkjs/common/Images/fonts_thumbnail.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail@1.25x.png        $DIR/sdkjs/common/Images/fonts_thumbnail@1.25x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail@1.5x.png         $DIR/sdkjs/common/Images/fonts_thumbnail@1.5x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail@1.75x.png        $DIR/sdkjs/common/Images/fonts_thumbnail@1.75x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail@2x.png           $DIR/sdkjs/common/Images/fonts_thumbnail@2x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail_ea.png           $DIR/sdkjs/common/Images/fonts_thumbnail_ea.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail_ea@1.25x.png     $DIR/sdkjs/common/Images/fonts_thumbnail_ea@1.25x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail_ea@1.5x.png      $DIR/sdkjs/common/Images/fonts_thumbnail_ea@1.5x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail_ea@1.75x.png     $DIR/sdkjs/common/Images/fonts_thumbnail_ea@1.75x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail_ea@2x.png        $DIR/sdkjs/common/Images/fonts_thumbnail_ea@2x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail.png.bin          $DIR/sdkjs/common/Images/fonts_thumbnail.png.bin
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail@1.25x.png.bin    $DIR/sdkjs/common/Images/fonts_thumbnail@1.25x.png.bin
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail@1.5x.png.bin     $DIR/sdkjs/common/Images/fonts_thumbnail@1.5x.png.bin
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail@1.75x.png.bin    $DIR/sdkjs/common/Images/fonts_thumbnail@1.75x.png.bin
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail@2x.png.bin       $DIR/sdkjs/common/Images/fonts_thumbnail@2x.png.bin
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail_ea.png.bin       $DIR/sdkjs/common/Images/fonts_thumbnail_ea.png.bin
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail_ea@1.25x.png.bin $DIR/sdkjs/common/Images/fonts_thumbnail_ea@1.25x.png.bin
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail_ea@1.5x.png.bin  $DIR/sdkjs/common/Images/fonts_thumbnail_ea@1.5x.png.bin
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail_ea@1.75x.png.bin $DIR/sdkjs/common/Images/fonts_thumbnail_ea@1.75x.png.bin
-      ln -s -f $OUTDIR/sdkjs/common/Images/fonts_thumbnail_ea@2x.png.bin    $DIR/sdkjs/common/Images/fonts_thumbnail_ea@2x.png.bin
-      ln -s -f $OUTDIR/sdkjs/common/AllFonts.js $DIR/sdkjs/common/AllFonts.js
+      link_generated_file server/FileConverter/bin/AllFonts.js
+      link_generated_file server/FileConverter/bin/font_selection.bin
+      link_generated_dir fonts
+      link_generated_file sdkjs/common/Images/fonts_thumbnail.png
+      link_generated_file sdkjs/common/Images/fonts_thumbnail@1.25x.png
+      link_generated_file sdkjs/common/Images/fonts_thumbnail@1.5x.png
+      link_generated_file sdkjs/common/Images/fonts_thumbnail@1.75x.png
+      link_generated_file sdkjs/common/Images/fonts_thumbnail@2x.png
+      link_generated_file sdkjs/common/Images/fonts_thumbnail_ea.png
+      link_generated_file sdkjs/common/Images/fonts_thumbnail_ea@1.25x.png
+      link_generated_file sdkjs/common/Images/fonts_thumbnail_ea@1.5x.png
+      link_generated_file sdkjs/common/Images/fonts_thumbnail_ea@1.75x.png
+      link_generated_file sdkjs/common/Images/fonts_thumbnail_ea@2x.png
+      link_generated_file sdkjs/common/Images/fonts_thumbnail.png.bin
+      link_generated_file sdkjs/common/Images/fonts_thumbnail@1.25x.png.bin
+      link_generated_file sdkjs/common/Images/fonts_thumbnail@1.5x.png.bin
+      link_generated_file sdkjs/common/Images/fonts_thumbnail@1.75x.png.bin
+      link_generated_file sdkjs/common/Images/fonts_thumbnail@2x.png.bin
+      link_generated_file sdkjs/common/Images/fonts_thumbnail_ea.png.bin
+      link_generated_file sdkjs/common/Images/fonts_thumbnail_ea@1.25x.png.bin
+      link_generated_file sdkjs/common/Images/fonts_thumbnail_ea@1.5x.png.bin
+      link_generated_file sdkjs/common/Images/fonts_thumbnail_ea@1.75x.png.bin
+      link_generated_file sdkjs/common/Images/fonts_thumbnail_ea@2x.png.bin
+      link_generated_file sdkjs/common/AllFonts.js
       #themes
       mv $DIR/sdkjs/slide/themes $DIR/sdkjs/slide/themes_backup
-      ln -s -f $OUTDIR/sdkjs/slide/themes $DIR/sdkjs/slide/themes
-      ln -s -f $OUTDIR/sdkjs/common/Images/themes_thumbnail.png       $DIR/sdkjs/common/Images/themes_thumbnail.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/themes_thumbnail@1.25x.png $DIR/sdkjs/common/Images/themes_thumbnail@1.25x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/themes_thumbnail@1.5x.png  $DIR/sdkjs/common/Images/themes_thumbnail@1.5x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/themes_thumbnail@1.75x.png $DIR/sdkjs/common/Images/themes_thumbnail@1.75x.png
-      ln -s -f $OUTDIR/sdkjs/common/Images/themes_thumbnail@2x.png    $DIR/sdkjs/common/Images/themes_thumbnail@2x.png
+      link_generated_dir sdkjs/slide/themes
+      link_generated_file sdkjs/common/Images/themes_thumbnail.png
+      link_generated_file sdkjs/common/Images/themes_thumbnail@1.25x.png
+      link_generated_file sdkjs/common/Images/themes_thumbnail@1.5x.png
+      link_generated_file sdkjs/common/Images/themes_thumbnail@1.75x.png
+      link_generated_file sdkjs/common/Images/themes_thumbnail@2x.png
       #package version
       BUILD_VERSION=`cat var/www/onlyoffice/documentserver/server/Common/sources/commondefines.js | grep "const buildVersion" | grep -o "[0-9.]*"`
       BUILD_NUMBER=`cat var/www/onlyoffice/documentserver/server/Common/sources/commondefines.js | grep "const buildNumber" | grep -o "[0-9]*"`
@@ -162,13 +216,13 @@ parts:
       sed -i -e '/wopi.enable/c <br />Set the <b>onlyoffice.wopi</b> parameter in the Document Server snap configuration to <b>true</b>.' $DIR-example/nodejs/views/wopiIndex.ejs
       #Add symlink for documentserver-flush-cache.sh script
       mv $DIR/web-apps/apps/api/documents/api.js $DIR/web-apps/apps/api/documents/api.js.tpl
-      ln -s -f $OUTDIR/web-apps/apps/api/documents/api.js $DIR/web-apps/apps/api/documents/api.js
+      link_generated_file web-apps/apps/api/documents/api.js
 
   node:
     plugin: dump
     source:
-      - to amd64: https://nodejs.org/dist/v24.16.0/node-v24.16.0-linux-x64.tar.gz
-      - to arm64: https://nodejs.org/dist/v24.16.0/node-v24.16.0-linux-arm64.tar.gz
+      - to amd64: https://nodejs.org/dist/v16.15.0/node-v16.15.0-linux-x64.tar.gz
+      - to arm64: https://nodejs.org/dist/v16.15.0/node-v16.15.0-linux-arm64.tar.gz
     override-build: |
       craftctl default
       rm -f $CRAFT_PART_INSTALL/README.md
@@ -240,6 +294,94 @@ parts:
       - zlib1g-dev
       - wget
   
+  boost:
+    plugin: dump
+    source: https://github.com/kyrofa/boost_tarball/raw/master/boost_1_59_0.tar.gz
+    stage:
+      - boost/
+    prime:
+      - -*
+
+  mysql:
+    plugin: cmake
+    source: https://github.com/mysql/mysql-server.git
+    source-tag: mysql-5.7.27
+    source-depth: 1
+    override-pull: |
+      craftctl default
+    after: [boost, patches]
+    cmake-parameters:
+      - -WITH_LIBWRAP=ON
+      - -DMYSQL_TCP_PORT=3306
+      - -DWITH_BOOST=$CRAFT_STAGE
+      - -DWITH_INNODB_PAGE_CLEANER_PRIORITY=OFF
+      - -DCMAKE_INSTALL_PREFIX=/
+      - -DBUILD_CONFIG=mysql_release
+      - -DWITH_UNIT_TESTS=OFF
+      - -DWITH_EMBEDDED_SERVER=OFF
+      - -DWITH_ARCHIVE_STORAGE_ENGINE=OFF
+      - -DWITH_BLACKHOLE_STORAGE_ENGINE=OFF
+      - -DWITH_FEDERATED_STORAGE_ENGINE=OFF
+      - -DWITH_PARTITION_STORAGE_ENGINE=OFF
+      - -DINSTALL_MYSQLTESTDIR=
+    stage-packages:
+      - libaio1t64
+    build-packages:
+      - wget
+      - g++
+      - cmake
+      - bison
+      - libncurses-dev
+      - libaio-dev
+      - libtirpc-dev
+      - libtirpc3t64
+      - pkg-config
+    stage:
+      # Remove scripts that we'll be replacing with our own
+      - -support-files/mysql.server
+      - -COPYING
+    prime:
+      # Remove scripts that we'll be replacing with our own
+      - -support-files/mysql.server
+
+      # Remove unused binaries that waste space
+      - -bin/innochecksum
+      - -bin/lz4_decompress
+      - -bin/myisam*
+      - -bin/mysqladmin
+      - -bin/mysqlbinlog
+      - -bin/mysql_client_test
+      - -bin/mysql_config*
+      - -bin/mysqld_multi
+      - -bin/mysqlimport
+      - -bin/mysql_install_db
+      - -bin/mysql_plugin
+      - -bin/mysqlpump
+      - -bin/mysql_secure_installation
+      - -bin/mysqlshow
+      - -bin/mysqlslap
+      - -bin/mysql_ssl_rsa_setup
+      - -bin/mysqltest
+      - -bin/mysql_tzinfo_to_sql
+      - -bin/perror
+      - -bin/replace
+      - -bin/resolveip
+      - -bin/resolve_stack_dump
+      - -bin/zlib_decompress
+
+  mysql-customizations:
+    plugin: dump
+    source: src/mysql/
+
+  patches:
+    source: src/patches
+    plugin: dump
+    prime:
+      - -*
+  common:
+    plugin: dump
+    source: src/common/
+
   ds-package:
     after:
       - server
@@ -357,5 +499,6 @@ parts:
     source: ./bin/
     organize:
       documentserver-start.sh: usr/sbin/documentserver-start.sh
+      rabbitmq-env-start.sh: usr/lib/rabbitmq/bin/rabbitmq-env-start.sh
       nginx-start.sh: usr/sbin/nginx-start.sh
       generate-all-fonts.sh: usr/sbin/generate-all-fonts.sh
