@@ -372,6 +372,7 @@ parts:
   mysql-customizations:
     plugin: dump
     source: src/mysql/
+    source-type: local
 
   patches:
     source: src/patches/
