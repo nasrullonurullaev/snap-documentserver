@@ -374,7 +374,8 @@ parts:
     source: src/mysql/
 
   patches:
-    source: src/patches
+    source: src/patches/
+    source-type: local
     plugin: dump
     prime:
       - -*
