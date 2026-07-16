@@ -1,4 +1,4 @@
-name: Build SNAP package
+name: Build and publish SNAP package
 
 run-name: Build ONLYOFFICE_Docs-${{ github.event.inputs.version }}-${{ github.event.inputs.build }}
 
@@ -32,9 +32,9 @@ jobs:
         sed -i -r "/version:/s/([0-9]+).([0-9]+).([0-9]+)/${VERSION}/" ./snap/snapcraft.yaml
         #replace link to archive to test
         #arm
-        sed -i -e '/arm64:/s|https://download.onlyoffice.com/install/document|https://s3.eu-west-1.amazonaws.com/repo-doc-onlyoffice-com/|' ./snap/snapcraft.yaml
-        sed -i -e '/arm64:/s|server/linux/|server/linux/snap/|' ./snap/snapcraft.yaml
-        sed -i -e "/arm64:/s|_aarch64|-${BUILD_NUMBER}-aarch64|" ./snap/snapcraft.yaml
+        #sed -i -e '/arm64:/s|https://download.onlyoffice.com/install/document|https://s3.eu-west-1.amazonaws.com/repo-doc-onlyoffice-com/|' ./snap/snapcraft.yaml
+        #sed -i -e '/arm64:/s|server/linux/|server/linux/snap/|' ./snap/snapcraft.yaml
+        #sed -i -e "/arm64:/s|_aarch64|-${BUILD_NUMBER}-aarch64|" ./snap/snapcraft.yaml
 
     - name: Build snap
       uses: snapcore/action-build@v1
@@ -46,22 +46,12 @@ jobs:
         SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}
       run: |
         set -euo pipefail
-        snapcraft upload "onlyoffice-ds_${{ github.event.inputs.version }}_arm64.snap" --release beta 2>&1 | tee snapcraft-publish-arm64.log
-        REVISION=$(grep -oE 'Revision [0-9]+' snapcraft-publish-arm64.log | awk '{print $2}' | tail -n 1 || true)
-        if [[ -z "$REVISION" ]]; then
-          echo "::error::ARM64 revision was not found in publish log"
-          exit 1
-        fi
+        export PATH="/snap/bin:$PATH"
+        snapcraft upload onlyoffice-ds_${{ github.event.inputs.version }}_arm64.snap --release beta 2>&1 | tee snapcraft-upload.log
+        REVISION=$(grep -oE 'Revision [0-9]+' snapcraft-upload.log | awk '{print $2}' | tail -n 1 || true)
+        [[ -n "$REVISION" ]] || { echo "::warning::Snap revision was not found in snapcraft upload output"; exit 1; }
         echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
         echo "::notice::Snap published to revision $REVISION"
-
-    - name: Upload ARM64 publish log
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: snapcraft-publish-arm64-${{ github.run_id }}
-        path: snapcraft-publish-arm64.log
-        if-no-files-found: warn
 
   build_amd64:
     runs-on: ubuntu-24.04
@@ -80,9 +70,9 @@ jobs:
         sed -i -r "/version:/s/([0-9]+).([0-9]+).([0-9]+)/${VERSION}/" ./snap/snapcraft.yaml
         #replace link to archive to test
         #x64
-        sed -i -e '/amd64:/s|https://download.onlyoffice.com/install/document|https://s3.eu-west-1.amazonaws.com/repo-doc-onlyoffice-com/|' ./snap/snapcraft.yaml
-        sed -i -e '/amd64:/s|server/linux/|server/linux/snap/|' ./snap/snapcraft.yaml
-        sed -i -e "/amd64:/s|_x86_64|-${BUILD_NUMBER}-x86_64|" ./snap/snapcraft.yaml
+        #sed -i -e '/amd64:/s|https://download.onlyoffice.com/install/document|https://s3.eu-west-1.amazonaws.com/repo-doc-onlyoffice-com/|' ./snap/snapcraft.yaml
+        #sed -i -e '/amd64:/s|server/linux/|server/linux/snap/|' ./snap/snapcraft.yaml
+        #sed -i -e "/amd64:/s|_x86_64|-${BUILD_NUMBER}-x86_64|" ./snap/snapcraft.yaml
 
     - name: Build snap
       uses: snapcore/action-build@v1
@@ -94,19 +84,62 @@ jobs:
         SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}
       run: |
         set -euo pipefail
-        snapcraft upload "onlyoffice-ds_${{ github.event.inputs.version }}_amd64.snap" --release beta 2>&1 | tee snapcraft-publish-amd64.log
-        REVISION=$(grep -oE 'Revision [0-9]+' snapcraft-publish-amd64.log | awk '{print $2}' | tail -n 1 || true)
-        if [[ -z "$REVISION" ]]; then
-          echo "::error::AMD64 revision was not found in publish log"
-          exit 1
-        fi
+        export PATH="/snap/bin:$PATH"
+        snapcraft upload onlyoffice-ds_${{ github.event.inputs.version }}_amd64.snap --release beta 2>&1 | tee snapcraft-upload.log
+        REVISION=$(grep -oE 'Revision [0-9]+' snapcraft-upload.log | awk '{print $2}' | tail -n 1 || true)
+        [[ -n "$REVISION" ]] || { echo "::warning::Snap revision was not found in snapcraft upload output"; exit 1; }
         echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
         echo "::notice::Snap published to revision $REVISION"
 
-    - name: Upload AMD64 publish log
-      if: always()
-      uses: actions/upload-artifact@v4
+  update_report:
+    runs-on: ubuntu-24.04
+    needs:
+    - build_arm64
+    - build_amd64
+    if: needs.build_arm64.outputs.revision != '' && needs.build_amd64.outputs.revision != ''
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
       with:
-        name: snapcraft-publish-amd64-${{ github.run_id }}
-        path: snapcraft-publish-amd64.log
-        if-no-files-found: warn
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+
+    - name: Update server.html snap revisions
+      env:
+        VERSION: ${{ github.event.inputs.version }}
+        BUILD_NUMBER: ${{ github.event.inputs.build }}
+        AMD64_REVISION: ${{ needs.build_amd64.outputs.revision }}
+        ARM64_REVISION: ${{ needs.build_arm64.outputs.revision }}
+        S3_BUCKET: ${{ vars.S3_BUCKET || 'repo-doc-onlyoffice-com' }}
+      run: |
+        set -euo pipefail
+
+        TMP_FILE=$(mktemp)
+        for KEY in \
+          "reports/release/v${VERSION}/${BUILD_NUMBER}/server.html" \
+          "reports/release/v${VERSION}/latest/server.html"
+        do
+          echo "Updating s3://${S3_BUCKET}/${KEY}"
+
+          for ATTEMPT in {1..30}; do
+            if aws s3 cp "s3://${S3_BUCKET}/${KEY}" "$TMP_FILE"; then
+              break
+            fi
+
+            if [[ "$ATTEMPT" == "30" ]]; then
+              echo "::warning::Report not found: s3://${S3_BUCKET}/${KEY}"
+              exit 1
+            fi
+
+            sleep 20
+          done
+
+          grep -q "DS_SNAP_AMD64_REVISION_ANCHOR" "$TMP_FILE"
+          grep -q "DS_SNAP_ARM64_REVISION_ANCHOR" "$TMP_FILE"
+          sed -i \
+            -e "s/DS_SNAP_AMD64_REVISION_ANCHOR/${AMD64_REVISION}/g" \
+            -e "s/DS_SNAP_ARM64_REVISION_ANCHOR/${ARM64_REVISION}/g" \
+            "$TMP_FILE"
+          aws s3 cp --content-type text/html "$TMP_FILE" "s3://${S3_BUCKET}/${KEY}"
+        done
