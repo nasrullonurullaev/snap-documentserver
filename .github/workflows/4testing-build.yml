@@ -43,7 +43,7 @@ jobs:
       env:
         SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}
       with:
-        snap: onlyoffice-ds_${{ github.event.inputs.version }}_arm64.snap
+        snap: nasrullo-test_${{ github.event.inputs.version }}_arm64.snap
         release: beta
 
     - name: Notice for revision
@@ -81,7 +81,7 @@ jobs:
       env:
         SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}
       with:
-        snap: onlyoffice-ds_${{ github.event.inputs.version }}_amd64.snap
+        snap: nasrullo-test_${{ github.event.inputs.version }}_amd64.snap
         release: beta
 
     - name: Notice for revision
