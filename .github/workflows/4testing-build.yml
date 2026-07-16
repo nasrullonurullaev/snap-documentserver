@@ -1,4 +1,4 @@
-name: Build SNAP package
+name: Build and publish SNAP package
 
 run-name: Build ONLYOFFICE_Docs-${{ github.event.inputs.version }}-${{ github.event.inputs.build }}
 
@@ -17,6 +17,8 @@ on:
 jobs:
   build_arm64:
     runs-on: ubuntu-24.04-arm
+    outputs:
+      revision: ${{ steps.revision.outputs.revision }}
     steps:
     - name: Check out Git repository
       uses: actions/checkout@v4
@@ -38,15 +40,27 @@ jobs:
       uses: snapcore/action-build@v1
       id: build
 
-    - name: Upload ARM64 snap artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: onlyoffice-ds-${{ github.event.inputs.version }}-arm64
-        path: onlyoffice-ds_${{ github.event.inputs.version }}_arm64.snap
-        if-no-files-found: error
+    - name: Publish ARM64 snap
+      id: revision
+      env:
+        SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}
+      run: |
+        set -euo pipefail
+        export PATH="/snap/bin:$PATH"
+        LOGIN_FILE=$(mktemp)
+        trap 'rm -f "$LOGIN_FILE"; snapcraft logout || true' EXIT
+        printf '%s' "$SNAPCRAFT_STORE_CREDENTIALS" > "$LOGIN_FILE"
+        snapcraft login --with "$LOGIN_FILE"
+        snapcraft upload onlyoffice-ds_${{ github.event.inputs.version }}_arm64.snap --release beta 2>&1 | tee snapcraft-upload.log
+        REVISION=$(grep -oE 'Revision [0-9]+' snapcraft-upload.log | awk '{print $2}' | tail -n 1 || true)
+        [[ -n "$REVISION" ]] || { echo "::warning::Snap revision was not found in snapcraft upload output"; exit 1; }
+        echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
+        echo "::notice::Snap published to revision $REVISION"
 
   build_amd64:
     runs-on: ubuntu-24.04
+    outputs:
+      revision: ${{ steps.revision.outputs.revision }}
     steps:
     - name: Check out Git repository
       uses: actions/checkout@v4
@@ -68,10 +82,72 @@ jobs:
       uses: snapcore/action-build@v1
       id: build
 
-    - name: Upload AMD64 snap artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: onlyoffice-ds-${{ github.event.inputs.version }}-amd64
-        path: onlyoffice-ds_${{ github.event.inputs.version }}_amd64.snap
-        if-no-files-found: error
+    - name: Publish AMD64 snap
+      id: revision
+      env:
+        SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}
+      run: |
+        set -euo pipefail
+        export PATH="/snap/bin:$PATH"
+        LOGIN_FILE=$(mktemp)
+        trap 'rm -f "$LOGIN_FILE"; snapcraft logout || true' EXIT
+        printf '%s' "$SNAPCRAFT_STORE_CREDENTIALS" > "$LOGIN_FILE"
+        snapcraft login --with "$LOGIN_FILE"
+        snapcraft upload onlyoffice-ds_${{ github.event.inputs.version }}_amd64.snap --release beta 2>&1 | tee snapcraft-upload.log
+        REVISION=$(grep -oE 'Revision [0-9]+' snapcraft-upload.log | awk '{print $2}' | tail -n 1 || true)
+        [[ -n "$REVISION" ]] || { echo "::warning::Snap revision was not found in snapcraft upload output"; exit 1; }
+        echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
+        echo "::notice::Snap published to revision $REVISION"
 
+  update_report:
+    runs-on: ubuntu-24.04
+    needs:
+    - build_arm64
+    - build_amd64
+    if: needs.build_arm64.outputs.revision != '' && needs.build_amd64.outputs.revision != ''
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+
+    - name: Update server.html snap revisions
+      env:
+        VERSION: ${{ github.event.inputs.version }}
+        BUILD_NUMBER: ${{ github.event.inputs.build }}
+        AMD64_REVISION: ${{ needs.build_amd64.outputs.revision }}
+        ARM64_REVISION: ${{ needs.build_arm64.outputs.revision }}
+        S3_BUCKET: ${{ vars.S3_BUCKET || 'repo-doc-onlyoffice-com' }}
+      run: |
+        set -euo pipefail
+
+        TMP_FILE=$(mktemp)
+        for KEY in \
+          "reports/release/v${VERSION}/${BUILD_NUMBER}/server.html" \
+          "reports/release/v${VERSION}/latest/server.html"
+        do
+          echo "Updating s3://${S3_BUCKET}/${KEY}"
+
+          for ATTEMPT in {1..30}; do
+            if aws s3 cp "s3://${S3_BUCKET}/${KEY}" "$TMP_FILE"; then
+              break
+            fi
+
+            if [[ "$ATTEMPT" == "30" ]]; then
+              echo "::warning::Report not found: s3://${S3_BUCKET}/${KEY}"
+              exit 1
+            fi
+
+            sleep 20
+          done
+
+          grep -q "DS_SNAP_AMD64_REVISION_ANCHOR" "$TMP_FILE"
+          grep -q "DS_SNAP_ARM64_REVISION_ANCHOR" "$TMP_FILE"
+          sed -i \
+            -e "s/DS_SNAP_AMD64_REVISION_ANCHOR/${AMD64_REVISION}/g" \
+            -e "s/DS_SNAP_ARM64_REVISION_ANCHOR/${ARM64_REVISION}/g" \
+            "$TMP_FILE"
+          aws s3 cp --content-type text/html "$TMP_FILE" "s3://${S3_BUCKET}/${KEY}"
+        done
