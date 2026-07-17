@@ -96,7 +96,10 @@ jobs:
     needs:
     - build_arm64
     - build_amd64
-    if: needs.build_arm64.outputs.revision != '' && needs.build_amd64.outputs.revision != ''
+    if: >-
+      github.ref_name == 'release' &&
+      needs.build_arm64.outputs.revision != '' &&
+      needs.build_amd64.outputs.revision != ''
     steps:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -116,6 +119,7 @@ jobs:
         set -euo pipefail
 
         TMP_FILE=$(mktemp)
+        trap 'rm -f "$TMP_FILE"' EXIT
         for KEY in \
           "reports/release/v${VERSION}/${BUILD_NUMBER}/server.html" \
           "reports/release/v${VERSION}/latest/server.html"
@@ -124,19 +128,27 @@ jobs:
 
           for ATTEMPT in {1..30}; do
             if aws s3 cp "s3://${S3_BUCKET}/${KEY}" "$TMP_FILE"; then
-              break
+              if grep -q "DS_SNAP_AMD64_REVISION_ANCHOR" "$TMP_FILE" && \
+                 grep -q "DS_SNAP_ARM64_REVISION_ANCHOR" "$TMP_FILE"; then
+                break
+              fi
+
+              if grep -q -- "--revision=${AMD64_REVISION}" "$TMP_FILE" && \
+                 grep -q -- "--revision=${ARM64_REVISION}" "$TMP_FILE"; then
+                echo "Snap revisions are already present in s3://${S3_BUCKET}/${KEY}"
+                continue 2
+              fi
             fi
 
             if [[ "$ATTEMPT" == "30" ]]; then
-              echo "::warning::Report not found: s3://${S3_BUCKET}/${KEY}"
+              echo "::warning::Report is not ready or snap revision anchors are missing: s3://${S3_BUCKET}/${KEY}"
               exit 1
             fi
 
+            echo "Report is not ready yet (attempt ${ATTEMPT}/30); retrying in 20 seconds"
             sleep 20
           done
 
-          grep -q "DS_SNAP_AMD64_REVISION_ANCHOR" "$TMP_FILE"
-          grep -q "DS_SNAP_ARM64_REVISION_ANCHOR" "$TMP_FILE"
           sed -i \
             -e "s/DS_SNAP_AMD64_REVISION_ANCHOR/${AMD64_REVISION}/g" \
             -e "s/DS_SNAP_ARM64_REVISION_ANCHOR/${ARM64_REVISION}/g" \
