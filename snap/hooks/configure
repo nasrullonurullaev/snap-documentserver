@@ -42,7 +42,7 @@ nginx_onlyoffice_http_port()
 	set_onlyoffice_https_port "$onlyoffice_https_port"
 	set_previous_onlyoffice_https_port $onlyoffice_https_port
 
-	snapctl restart onlyoffice-ds.nginx
+	snapctl restart nasrullo-test.nginx
 }
 
 set_onlyoffice_http_port()
@@ -114,7 +114,7 @@ token_onlyoffice_jwt_enabled()
 	set_onlyoffice_jwt_enabled "$onlyoffice_jwt_enabled"
 	set_previous_onlyoffice_jwt_enabled $onlyoffice_jwt_enabled
 	update_jwt_enabled_settings
-	snapctl restart onlyoffice-ds.documentserver
+	snapctl restart nasrullo-test.documentserver
 }
 
 set_onlyoffice_jwt_enabled()
@@ -182,7 +182,7 @@ token_onlyoffice_jwt_secret()
 
 	sed -i "/secret/s/"${previous_onlyoffice_jwt_secret}"/"${onlyoffice_jwt_secret}"/g" $DS_EXAMPLE_CONF_DIR/local.json
 
-	snapctl restart onlyoffice-ds.documentserver
+	snapctl restart nasrullo-test.documentserver
 }
 
 set_onlyoffice_jwt_secret()
@@ -223,7 +223,7 @@ token_onlyoffice_jwt_header()
 	set_previous_onlyoffice_jwt_header $onlyoffice_jwt_header
 	sed -i "/header/s/"${previous_onlyoffice_jwt_header}"/"${onlyoffice_jwt_header}"/g" $SNAP_DATA/etc/onlyoffice/documentserver/local.json
 	sed -i "/authorizationHeader/s/"${previous_onlyoffice_jwt_header}"/"${onlyoffice_jwt_header}"/g" $SNAP_DATA/etc/onlyoffice/documentserver-example/local.json
-	snapctl restart onlyoffice-ds.documentserver
+	snapctl restart nasrullo-test.documentserver
 }
 
 set_onlyoffice_jwt_header()
@@ -354,7 +354,7 @@ token_onlyoffice_loopback()
 	set_onlyoffice_loopback "$onlyoffice_loopback"
 	set_previous_onlyoffice_loopback "$onlyoffice_loopback"
 
-	snapctl restart onlyoffice-ds.nginx
+	snapctl restart nasrullo-test.nginx
 }
 
 set_onlyoffice_loopback()
@@ -398,8 +398,8 @@ token_onlyoffice_wopi()
 	set_onlyoffice_wopi "$onlyoffice_wopi"
 	set_previous_onlyoffice_wopi "$onlyoffice_wopi"
 
-	snapctl restart onlyoffice-ds.nginx
-	snapctl restart onlyoffice-ds.documentserver
+	snapctl restart nasrullo-test.nginx
+	snapctl restart nasrullo-test.documentserver
 }
 
 set_onlyoffice_wopi()

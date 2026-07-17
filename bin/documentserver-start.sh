@@ -58,7 +58,7 @@ if [ "${JWT_SECRET}" == "default-jwt-secret" ]; then
     RANDOM_STRING=$(od -An -N4 -i < /dev/urandom | md5sum | head -c 10)
     snapctl set onlyoffice.jwt-secret=$RANDOM_STRING
 
-    echo "JWT is enabled by default. A random secret is generated automatically. Run the command \"sudo snap get onlyoffice-ds onlyoffice.jwt-secret\" to get information about JWT."
+    echo "JWT is enabled by default. A random secret is generated automatically. Run the command \"sudo snap get nasrullo-test onlyoffice.jwt-secret\" to get information about JWT."
 fi
 
 documentserver-flush-cache.sh -r false
